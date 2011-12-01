@@ -1,0 +1,39 @@
+commit 7a17ff0743cdec7ee2edb2b3aad347566136b6d5
+Author: Nathan Fontenot <nfont@shady-lp2.ltc.austin.ibm.com>
+Date:   Wed Apr 7 20:19:01 2010 -0500
+
+    This patch adds -a -V options to the ofpathname man page.
+    
+    Signed-off-by: Kamalesh Babulal <kamalesh@linux.vnet.ibm.com>
+
+diff --git a/man/ofpathname.8 b/man/ofpathname.8
+index 1f61b88..d5abc17 100644
+--- a/man/ofpathname.8
++++ b/man/ofpathname.8
+@@ -6,7 +6,7 @@
+ .SH NAME
+ ofpathname \- translate between Open Firmware and logical device names
+ .SH SYNOPSIS
+-\fB/usr/sbin/ofpathname \fR[\fB-lq\fR] \fIname
++\fB/usr/sbin/ofpathname \fR[\fB-laqVh\fR] \fIname
+ .SH DESCRIPTION
+ .I Ofpathname
+ provides the ability to translate logical device names to their Open Firmware
+@@ -17,10 +17,16 @@ Firmware device path to its logical device name using the -l option.
+ \fB\-l
+ Translate the \fIname \fRparameter to the corresponding logical device name.
+ .TP
++\fB\-a
++Find a matching Open Firmware device alias[es].
++.TP
+ \fB\--quiet \fR(\fB\-q\fR)
+ Do not report any failures, exit quietly.
+ .TP
+-\fB\--help \fR(\fB\-?\fR)
++\fB\--version \fR(\fB\-V\fR)
++Displat version and exit
++.TP
++\fB\--help \fR(\fB\-h\fR)
+ print usage information.
+ .SH AUTHOR
+ Written by Nathan Fontenot

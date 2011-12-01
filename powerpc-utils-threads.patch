@@ -1,0 +1,157 @@
+The current logic in ppc64_cpu will loop through the maximum number
+of cpu threads (set to 1024) when trying to determine or set a particular
+cpu attribuite.
+
+For example, when setting smt mode, the code would try to set cpu
+thread 0..1024 either online or offline until a failure occurs.  This
+usually was trying to set the smt mode for a cpu thread that does not exist.
+While this is mostly harmless, the side effect was that an error was returned
+even though the smt setting operation completed successfully.
+
+This patch changes the logic so that it only tries to set cpu attributes for
+the cpu threads that are present on the system.  This resolves the inadvertent
+error return and is logically a bit nicer than trying all possible threads.
+
+Signed-off-by: Nathan Fontenot <nfont@austin.ibm.com>
+---
+
+ src/ppc64_cpu.c |   50 ++++++++++++++++++++++++++++----------------------
+ 1 file changed, 28 insertions(+), 22 deletions(-)
+
+Index: powerpc-utils/src/ppc64_cpu.c
+===================================================================
+--- powerpc-utils.orig/src/ppc64_cpu.c	2009-12-01 13:31:21.000000000 -0600
++++ powerpc-utils/src/ppc64_cpu.c	2009-12-02 13:53:34.000000000 -0600
+@@ -19,11 +19,12 @@
+ #define SYSFS_CPUDIR	"/sys/devices/system/cpu/cpu%d"
+ #define INTSERV_PATH	"/proc/device-tree/cpus/%s/ibm,ppc-interrupt-server#s"
+ #define SYSFS_PATH_MAX	128
+-#define MAX_THREADS	1024
+ 
+ #define DIAGNOSTICS_RUN_MODE	42
+ 
+-int threads_per_cpu;
++int threads_per_cpu = 0;
++int cpus_in_system = 0;
++int threads_in_system = 0;
+ 
+ int get_attribute(char *path, int *value)
+ {
+@@ -72,7 +73,7 @@
+ 	int i, rc;
+ 	int system_attribute = -1;
+ 
+-	for (i = 0; i < MAX_THREADS; i++) {
++	for (i = 0; i < threads_in_system; i++) {
+ 		int cpu_attribute;
+ 
+ 		/* only check online cpus */
+@@ -99,7 +100,7 @@
+ 	char path[SYSFS_PATH_MAX];
+ 	int i, rc;
+ 
+-	for (i = 0; i < MAX_THREADS; i++) {
++	for (i = 0; i < threads_in_system; i++) {
+ 		/* only set online cpus */
+ 		if (!cpu_online(i))
+ 			continue;
+@@ -113,11 +114,11 @@
+ 	return 0;
+ }
+ 
+-int get_threads_per_cpu(void)
++int get_cpu_info(void)
+ {
+ 	DIR *d;
+ 	struct dirent *de;
+-	int nthreads = -1;
++	int first_cpu = 1;
+ 	int rc;
+ 
+ 	d = opendir("/proc/device-tree/cpus");
+@@ -126,20 +127,25 @@
+ 
+ 	while ((de = readdir(d)) != NULL) {
+ 		if (!strncmp(de->d_name, "PowerPC", 7)) {
+-			struct stat sbuf;
+-			char path[128];
++			if (first_cpu) {
++				struct stat sbuf;
++				char path[128];
++
++				sprintf(path, INTSERV_PATH, de->d_name);
++				rc = stat(path, &sbuf);
++				if (!rc)
++					threads_per_cpu = sbuf.st_size / 4;
+ 
+-			sprintf(path, INTSERV_PATH, de->d_name);
+-			rc = stat(path, &sbuf);
+-			if (!rc)
+-				nthreads = sbuf.st_size / 4;
++				first_cpu = 0;
++			}
+ 
+-			break;
++			cpus_in_system++;
+ 		}
+ 	}
+ 
+ 	closedir(d);
+-	return nthreads;
++	threads_in_system = cpus_in_system * threads_per_cpu;
++	return 0;
+ }
+ 
+ int is_smt_capable(void)
+@@ -148,7 +154,7 @@
+ 	char path[SYSFS_PATH_MAX];
+ 	int i;
+ 
+-	for (i = 0; i < MAX_THREADS; i++) {
++	for (i = 0; i < threads_in_system; i++) {
+ 		sprintf(path, SYSFS_CPUDIR"/smt_snooze_delay", i);
+ 		if (stat(path, &sb))
+ 			continue;
+@@ -187,7 +193,7 @@
+ 	int system_state = -1;
+ 	int i;
+ 
+-	for (i = 0; i < MAX_THREADS; i += threads_per_cpu) {
++	for (i = 0; i < threads_in_system; i += threads_per_cpu) {
+ 		int cpu_state;
+ 
+ 		cpu_state = get_one_smt_state(i);
+@@ -236,7 +242,7 @@
+ 	if (rc)
+ 		update_ssd = 0;
+ 
+-	for (i = 0; i < MAX_THREADS; i += threads_per_cpu) {
++	for (i = 0; i < threads_in_system; i += threads_per_cpu) {
+ 		rc = set_one_smt_state(i, smt_state);
+ 		if (rc)
+ 			break;
+@@ -254,7 +260,7 @@
+ 	char path[SYSFS_PATH_MAX];
+ 	int i;
+ 
+-	for (i = 0; i < MAX_THREADS; i++) {
++	for (i = 0; i < threads_in_system; i++) {
+ 		sprintf(path, SYSFS_CPUDIR"/dscr", i);
+ 		if (stat(path, &sb))
+ 			continue;
+@@ -436,10 +442,10 @@
+ 		return 0;
+ 	}
+ 
+-	threads_per_cpu = get_threads_per_cpu();
+-	if (threads_per_cpu < 0) {
+-		printf("Could not determine thread count\n");
+-		return -1;
++	rc = get_cpu_info();
++	if (rc) {
++		printf("Could not determine system cpu/thread information.\n");
++		return rc;
+ 	}
+ 
+ 	while (1) {
+

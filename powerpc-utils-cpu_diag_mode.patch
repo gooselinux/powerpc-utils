@@ -1,0 +1,13 @@
+Index: powerpc-utils-1.2.2/src/ppc64_cpu.c
+===================================================================
+--- powerpc-utils-1.2.2.orig/src/ppc64_cpu.c	2009-10-22 14:00:13.000000000 -0500
++++ powerpc-utils-1.2.2/src/ppc64_cpu.c	2010-05-17 14:29:45.577267014 -0500
+@@ -383,7 +383,7 @@
+ 	} else {
+ 		signed char rmode = *run_mode;
+ 
+-		if (rmode < 0 || rmode > 3) {
++		if (rmode < '0' || rmode > '3') {
+ 			printf("Invalid run-mode=%c\n", rmode);
+ 			return -1;
+ 		}

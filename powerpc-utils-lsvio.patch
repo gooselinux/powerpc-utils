@@ -1,0 +1,245 @@
+
+Adds ls-vscsi, ls-veth, and ls-vdev scripts the HMC can call
+to retrieve VIO related information from Linux.
+
+Signed-off-by: Brian King <brking@linux.vnet.ibm.com>
+---
+
+ powerpc-utils.spec.in |    3 +
+ scripts/Makefile.am   |    4 +-
+ scripts/Makefile.in   |    4 +-
+ scripts/ls-vdev       |   76 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ scripts/ls-veth       |   64 ++++++++++++++++++++++++++++++++++++++++++
+ scripts/ls-vscsi      |   62 ++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 209 insertions(+), 4 deletions(-)
+
+Index: powerpc-utils-1.2.2/scripts/ls-vdev
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ powerpc-utils-1.2.2/scripts/ls-vdev	2010-05-17 15:38:03.137899550 -0500
+@@ -0,0 +1,76 @@
++#! /bin/bash
++
++# Copyright (c) 2010 International Business Machines
++# Common Public License Version 1.0 (see COPYRIGHT)
++#
++# Author Brian King <brking@linux.vnet.ibm.com>
++#
++# ls-vdev - This utility provides the HMC or IVM with name information for
++# 	    virtual scsi adapters and devices
++#
++
++LSVDEV="ls-vdev"
++VERSION="0.1"
++LS="/bin/ls"
++GREP="/bin/grep"
++SED="/bin/sed"
++
++usage()
++{
++    echo "Usage: $LSVDEV"
++    echo "Provide information on Virtual SCSI adapters and devices"
++    echo ""
++    echo "Optional arguments."
++    echo "  -V, --version    Display version information and exit"
++    echo "  -h, --help       Display this help information and exit"
++    echo ""
++}
++
++show_version()
++{
++    echo "$LSVDEV: Version $VERSION"
++    echo "Written by: Brian King <brking@linux.vnet.ibm.com>"
++}
++
++
++while getopts "Vh" flag ; do
++    case "$flag" in
++        V) show_version
++                        exit 0 ;;
++
++        h)              usage
++                        exit 0 ;;
++        \?)             usage
++                        exit 1 ;;
++        :)              echo "Option -$OPTARG requires an argument."
++                        exit 1 ;;
++    esac
++done
++
++# Look at every ibmvscsi (Virtual SCSI) device
++for dev in $($LS -d /proc/device-tree/vdevice/v-scsi* 2> /dev/null) ; do
++    # find the slot so it can be used in sysfs
++    slot=$(echo $dev | $SED -e "s/\/proc\/device-tree\/vdevice\/v-scsi@//")
++
++    # there is only one host per device, assign it to the path's name
++    for host in $($LS -d /sys/devices/vio/$slot/host*) ; do
++	parent=$(echo $host | $SED -e "s/.*\///")
++	host=$($LS -d /sys/devices/vio/$slot/host*/)
++
++        # loop through the targets for this host.
++	for t in $($LS -d $host/target*); do
++	    target=$(echo $($LS -d $t/$($LS $t | $GREP -v uevent | $GREP -v power | $GREP -v subsystem)))
++	    if [[ ! -d $target/block ]]; then
++	         name=$(echo $($LS -d $target/block*) | $SED -e "s/.*://")
++	    else
++	         name=$($LS $target/block)
++	    fi
++
++	    echo "$parent $name"
++        done
++    done
++done
++
++exit 0
++
++# end
+Index: powerpc-utils-1.2.2/scripts/ls-veth
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ powerpc-utils-1.2.2/scripts/ls-veth	2010-05-17 15:38:03.137899550 -0500
+@@ -0,0 +1,64 @@
++#! /bin/bash
++
++# Copyright (c) 2010 International Business Machines
++# Common Public License Version 1.0 (see COPYRIGHT)
++#
++# Author Brian King <brking@linux.vnet.ibm.com>
++#
++# ls-veth - This utility provides the HMC or IVM with name information for
++# 	    virtual ethernet devices
++#
++
++LSVETH="ls-veth"
++VERSION="0.1"
++OFPATHNAME="/usr/sbin/ofpathname"
++CAT="/bin/cat"
++LS="/bin/ls"
++SED="/bin/sed"
++
++usage()
++{
++    echo "Usage: $LSVETH [-h]"
++    echo "Provide information on Virtual Ethernet devices"
++    echo ""
++    echo "Optional arguments."
++    echo "  -V, --version    Display version information and exit"
++    echo "  -h, --help       Display this help information and exit"
++    echo ""
++}
++
++show_version()
++{
++    echo "$LSVETH: Version $VERSION"
++    echo "Written by: Brian King <brking@linux.vnet.ibm.com>"
++}
++
++
++while getopts "Vh" flag ; do
++    case "$flag" in
++        V) show_version
++                        exit 0 ;;
++
++        h)              usage
++                        exit 0 ;;
++        \?)             usage
++                        exit 1 ;;
++        :)              echo "Option -$OPTARG requires an argument."
++                        exit 1 ;;
++    esac
++done
++
++# Look at every ibmveth (Virtual Ethernet) device
++for dev in $($LS -d /proc/device-tree/vdevice/l-lan* 2> /dev/null); do
++    # use ofpathname to get the device name (i.e. eth0)
++    name=$($OFPATHNAME -l $(echo $dev | $SED -e "s/\/proc\/device-tree//"))
++
++    # get the physical location
++    physloc=$($CAT $dev/ibm,loc-code)
++
++    echo "$name $physloc"
++done
++
++exit 0
++
++# end
+Index: powerpc-utils-1.2.2/scripts/ls-vscsi
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ powerpc-utils-1.2.2/scripts/ls-vscsi	2010-05-17 15:38:03.137899550 -0500
+@@ -0,0 +1,62 @@
++#! /bin/bash
++
++# Copyright (c) 2010 International Business Machines
++# Common Public License Version 1.0 (see COPYRIGHT)
++#
++# Author Brian King <brking@linux.vnet.ibm.com>
++#
++# ls-vscsi - This utility provides the HMC or IVM with name information for
++# 	     virtual scsi devices
++#
++
++LSVSCSI="ls-vscsi"
++VERSION="0.1"
++CAT="/bin/cat"
++LS="/bin/ls"
++SED="/bin/sed"
++
++usage()
++{
++    echo "Usage: $LSVSCSI"
++    echo "Provide information on Virtual devices"
++}
++
++show_version()
++{
++    echo "$LSVSCSI: Version $VERSION"
++    echo "Written by: Brian King <brking@linux.vnet.ibm.com>"
++}
++
++
++while getopts "Vh" flag ; do
++    case "$flag" in
++
++        V) show_version
++                        exit 0 ;;
++
++        h)              usage
++                        exit 0 ;;
++        \?)             usage
++                        exit 1 ;;
++    esac
++done
++
++
++# Look at every ibmvscsi (Virtual SCSI) device
++for dev in $($LS -d /proc/device-tree/vdevice/v-scsi* 2> /dev/null) ; do
++    # pull the physical location
++    physloc=$($CAT $dev/ibm,loc-code)
++
++    # find the slot so it can be used in sysfs
++    slot=$(echo $dev | $SED -e "s/\/proc\/device-tree\/vdevice\/v-scsi@//")
++
++    # there is only one host per device, assign it to the path's name
++    for host in $($LS -d /sys/devices/vio/$slot/host*) ; do
++	name=$(echo $host | $SED -e "s/.*\///")
++	echo "$name $physloc"
++    done
++done
++
++exit 0
++
++# end
+Index: powerpc-utils-1.2.2/scripts/Makefile.am
+===================================================================
+--- powerpc-utils-1.2.2.orig/scripts/Makefile.am	2009-10-22 14:00:13.000000000 -0500
++++ powerpc-utils-1.2.2/scripts/Makefile.am	2010-05-17 15:39:55.017270084 -0500
+@@ -1,7 +1,7 @@
+ bin_SCRIPTS = amsstat
+ 
+ sbin_SCRIPTS = update_flash hvcsadmin vscsisadmin rtas_dump snap	\
+-	       bootlist ofpathname lsdevinfo
++	       bootlist ofpathname lsdevinfo ls-veth ls-vscsi ls-vdev
+ 
+ initdir = /etc/init.d
+ init_DATA = ibmvscsis.sh

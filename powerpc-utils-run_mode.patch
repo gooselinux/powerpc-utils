@@ -1,0 +1,42 @@
+This patch corrects the parameter handling of ppc64_cpu when setting the
+run-mode.  The PAPR specifies that the rtas_[get|set]_system_parameter calls
+take a char buffer, but for the run mode it actually wants integer values in
+the buffer, not strings.  This updates the handling of the values to be
+integers.
+
+This patch also add an additional error message to indicate failure when a
+partition is not authorized to set the run mode.
+
+Signed-off-by:Nathan Fontenot <nfont@austin.ibm.com>
+---
+
+Index: powerpc-utils-1.2.2/src/ppc64_cpu.c
+===================================================================
+--- powerpc-utils-1.2.2.orig/src/ppc64_cpu.c	2010-06-10 13:22:02.000000000 -0500
++++ powerpc-utils-1.2.2/src/ppc64_cpu.c	2010-06-10 13:33:09.810455522 -0500
+@@ -416,11 +416,11 @@
+ 				printf("Could not retrieve current diagnostics "
+ 				       "mode\n");
+ 		} else
+-			printf("run-mode=%c\n", mode[2]);
++			printf("run-mode=%d\n", mode[2]);
+ 	} else {
+-		signed char rmode = *run_mode;
++		short rmode = atoi(run_mode);
+ 
+-		if (rmode < '0' || rmode > '3') {
++		if (rmode < 0 || rmode > 3) {
+ 			printf("Invalid run-mode=%c\n", rmode);
+ 			return -1;
+ 		}
+@@ -433,6 +433,9 @@
+ 			if (rc == -3)
+ 				printf("Machine does not support diagnostic "
+ 				       "run mode\n");
++			else if (rc == -9002)
++				printf("Machine is not authorized to set "
++				       "diagnostic run mode\n");
+ 			else
+ 				printf("Could not set diagnostics mode\n");
+ 		}
+

@@ -1,0 +1,17 @@
+Index: powerpc-utils-1.2.2/src/drmgr/common.c
+===================================================================
+--- powerpc-utils-1.2.2.orig/src/drmgr/common.c	2009-10-22 14:00:13.000000000 -0500
++++ powerpc-utils-1.2.2/src/drmgr/common.c	2010-05-26 18:18:08.960443479 -0500
+@@ -1025,6 +1025,12 @@
+ 	while ((de = readdir(d)) != NULL) {
+ 		if (strncmp(de->d_name, "cpu", 3))
+ 			continue;
++
++		/* Ensure this is a cpu directory, i.e. cpu0, and not a
++		 * non-cpu directory, i.e. cpufreq.
++		 */
++		if (!isdigit(de->d_name[3]))
++			continue;
+ 		
+ 		sprintf(fname, "%s/%s/online", cpu_dir, de->d_name);
+ 		

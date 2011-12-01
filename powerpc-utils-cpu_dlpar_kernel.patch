@@ -1,0 +1,261 @@
+commit e437301f6e9336e872696e0f4b794f1d0d851235
+Author: Nathan Fontenot <nfont@austin.ibm.com>
+Date:   Mon Jan 18 13:49:43 2010 -0600
+
+    This patch is dependent on two additional patches that are queued
+    for inclusion in the kernel.
+    
+    http://lists.ozlabs.org/pipermail/linuxppc-dev/2009-November/078181.html
+    http://lkml.org/lkml/2009/11/26/368
+    
+    With this new kernel functionality CPU  DLPAR can be done completely
+    in the kernel.  Under this new scheme the drmgr command only has to write
+    the drc-index of a cpu to /sys/devices/system/cpu/probe to have the cpu
+    dlpar added and hotplug added to the system.  The DLPAR remove of a cpu
+    involves writing the path in the device tree for the the cpu to be
+    removed to he /sys/sdevices/system/cpu/release file.  This will hotplug
+    remove the cpu and dlpar remove it.
+    
+    Signed-off-by: Nathan Fontenot <nfont@austin.ibm.com>
+
+diff --git a/src/drmgr/common_cpu.c b/src/drmgr/common_cpu.c
+index 31a519c..3f0473c 100644
+--- a/src/drmgr/common_cpu.c
++++ b/src/drmgr/common_cpu.c
+@@ -604,7 +604,7 @@ refresh_cache_info(struct dr_info *dr_info)
+  * @param drc_index
+  * @returns pointer to cpu_info on success, NULL otherwise
+  */
+-int
++static int
+ acquire_cpu(struct dr_node *cpu, struct dr_info *dr_info)
+ {
+ 	struct of_node *of_nodes;
+@@ -637,6 +637,57 @@ acquire_cpu(struct dr_node *cpu, struct dr_info *dr_info)
+ 	return 0;
+ }
+ 
++int
++probe_cpu(struct dr_node *cpu, struct dr_info *dr_info)
++{
++	char drc_index[DR_STR_MAX];
++	int probe_file;
++	int write_len;
++	int rc = 0;
++
++	probe_file = open(CPU_PROBE_FILE, O_WRONLY);
++	if (probe_file <= 0) {
++		/* Attempt to add cpu from user-space, this may be an older
++		 * kernel without the infrastructure to handle dlpar.
++		 */
++		rc = acquire_cpu(cpu, dr_info);
++		if (rc)
++			return rc;
++
++		rc = online_cpu(cpu, dr_info);
++		if (rc) {
++			/* Roll back the operation.  Is this the correct
++			 * behavior?
++			 */
++			dbg("Unable to online %s\n", cpu->drc_name);
++			offline_cpu(cpu);
++			release_cpu(cpu, dr_info);
++			cpu->unusable = 1;
++		}
++
++	} else {
++		memset(drc_index, 0, DR_STR_MAX);
++		write_len = sprintf(drc_index, "0x%x", cpu->drc_index);
++
++		dbg("Probing cpu 0x%x\n", cpu->drc_index);
++		rc = write(probe_file, drc_index, write_len);
++		if (rc != write_len)
++			dbg("Probe failed! rc = %x\n", rc);
++		else
++			/* reset rc to success */
++			rc = 0;
++
++		close(probe_file);
++	}
++
++	if (!rc) {
++		update_cpu_node(cpu, NULL, dr_info);
++		refresh_cache_info(dr_info);
++	}
++
++	return rc;
++}
++
+ /**
+  * release_caches
+  * Remove any unused cache info.  Failure to remove the cache, while not
+@@ -688,39 +739,66 @@ release_caches(struct dr_node *cpu, struct dr_info *dr_info)
+ int
+ release_cpu(struct dr_node *cpu, struct dr_info *dr_info)
+ {
++	int release_file;
+ 	int rc;
+ 
+-	/* Should we check to make sure all threads of the cpu are offline? */
++	release_file = open(CPU_RELEASE_FILE, O_WRONLY);
++	if (release_file > 0) {
++		/* DLPAR can be done in kernel */
++		char *path = cpu->ofdt_path + strlen(OFDT_BASE);
++		int write_len = strlen(path);
+ 
+-	rc = release_drc(cpu->drc_index, CPU_DEV);
+-	if (rc) {
+-		dbg("Could not release drc resources for %s\n", cpu->name);
+-		return rc;
+-	}
++		dbg("Releasing cpu \"%s\"\n", path);
++		rc = write(release_file, path, write_len);
++		if (rc != write_len)
++			dbg("Release failed! rc = %d\n", rc);
++		else
++			/* set rc to success */
++			rc = 0;
+ 
+-	rc = remove_device_tree_nodes(cpu->ofdt_path);
+-	if (rc) {
+-		struct of_node *of_nodes;
++		close(release_file);
++	} else {
++		/* Must do DLPAR from user-space */
++		rc = offline_cpu(cpu);
++		if (rc) {
++			err_msg("Could not offline cpu %s\n", cpu->drc_name);
++			return rc;
++		}
+ 
+-		dbg("Could not remove device tree nodes %s\n", cpu->name);
++		rc = release_drc(cpu->drc_index, CPU_DEV);
++		if (rc) {
++			dbg("Could not release drc resources for %s\n",
++			    cpu->name);
++			return rc;
++		}
++
++		rc = remove_device_tree_nodes(cpu->ofdt_path);
++		if (rc) {
++			struct of_node *of_nodes;
++
++			dbg("Could not remove device tree nodes %s\n",
++			    cpu->name);
+ 		
+-		of_nodes = configure_connector(cpu->drc_index);
+-		if (of_nodes == NULL) {
+-			err_msg("Call to configure_connector failed for %s. "
+-				"The device tree\nmay contain invalid data "
+-				"for this cpu and a re-activation of the "
+-				"partition is needed to correct it.\n",
+-				cpu->name);
+-		} else {
+-			rc = add_device_tree_nodes(CPU_OFDT_BASE, of_nodes);
+-			free_of_node(of_nodes);
++			of_nodes = configure_connector(cpu->drc_index);
++			if (of_nodes == NULL) {
++				err_msg("Call to configure_connector failed "
++					"for %s. The device tree\nmay contain "
++					"invalid data for this cpu and a "
++					"re-activation of the partition is "
++					"needed to correct it.\n", cpu->name);
++			} else {
++				rc = add_device_tree_nodes(CPU_OFDT_BASE,
++							   of_nodes);
++				free_of_node(of_nodes);
++			}
++
++			acquire_drc(cpu->drc_index);
++			return rc;
+ 		}
+ 
+-		acquire_drc(cpu->drc_index);
+-		return rc;
++		release_caches(cpu, dr_info);
+ 	}
+ 
+-	release_caches(cpu, dr_info);
+ 	return rc;
+ }
+ 
+diff --git a/src/drmgr/drcpu.h b/src/drmgr/drcpu.h
+index 576109e..da7abad 100644
+--- a/src/drmgr/drcpu.h
++++ b/src/drmgr/drcpu.h
+@@ -9,6 +9,9 @@
+ 
+ #include "dr.h"
+ 
++#define CPU_PROBE_FILE		"/sys/devices/system/cpu/probe"
++#define CPU_RELEASE_FILE	"/sys/devices/system/cpu/release"
++
+ struct cache_info {
+ 	char		name[DR_BUF_SZ];	/* node name */
+ 	char		path[DR_BUF_SZ];	/* node path */
+@@ -45,7 +48,7 @@ struct cache_info * cpu_get_dependent_cache(struct dr_node *, struct dr_info *);
+ struct cache_info * cache_get_dependent_cache(struct cache_info *,
+ 					      struct dr_info *);
+ int release_cpu(struct dr_node *, struct dr_info *);
+-int acquire_cpu(struct dr_node *, struct dr_info *);
++int probe_cpu(struct dr_node *, struct dr_info *);
+ struct dr_node *get_available_cpu(struct options *, struct dr_info *);
+ 
+ #endif /* _H_DRCPU */
+diff --git a/src/drmgr/drslot_chrp_cpu.c b/src/drmgr/drslot_chrp_cpu.c
+index 211dcc9..aab34fd 100644
+--- a/src/drmgr/drslot_chrp_cpu.c
++++ b/src/drmgr/drslot_chrp_cpu.c
+@@ -138,7 +138,7 @@ add_cpus(struct options *opts, struct dr_info *dr_info)
+ 		if (!cpu)
+ 			break;
+ 
+-		rc = acquire_cpu(cpu, dr_info);
++		rc = probe_cpu(cpu, dr_info);
+ 		if (rc) {
+ 			dbg("Unable to acquire CPU with drc index %x\n",
+ 			    cpu->drc_index);
+@@ -146,18 +146,6 @@ add_cpus(struct options *opts, struct dr_info *dr_info)
+ 			continue;
+ 		}
+ 
+-		rc = online_cpu(cpu, dr_info);
+-		if (rc) {
+-			/* Roll back the operation.  Is this the correct
+-			 * behavior?
+-			 */
+-			dbg("Unable to online %s\n", cpu->drc_name);
+-			offline_cpu(cpu);
+-			release_cpu(cpu, dr_info);
+-			cpu->unusable = 1;
+-			continue;
+-		}
+-
+ 		fprintf(stdout, "%s\n", cpu->drc_name);
+ 		count++;
+ 	}
+@@ -201,15 +189,6 @@ remove_cpus(struct options *opts, struct dr_info *dr_info)
+ 		if (!cpu)
+ 			break;
+ 
+-		rc = offline_cpu(cpu);
+-		if (rc) {
+-			/* Need to online any threads we took offline */
+-			online_cpu(cpu, dr_info);
+-			err_msg("Could not offline cpu %s\n", cpu->drc_name);
+-			cpu->unusable = 1;
+-			continue;
+-		}
+-
+ 		/* cpu is invalid after release_cpu, so no recovery
+ 		 * steps seem feasible.  We could copy the cpu name
+ 		 * and look it up again if the operation fails.
+@@ -217,8 +196,6 @@ remove_cpus(struct options *opts, struct dr_info *dr_info)
+ 		rc = release_cpu(cpu, dr_info);
+ 		if (rc) {
+ 			online_cpu(cpu, dr_info);
+-			err_msg("Offlined but could not release %s\n",
+-				cpu->drc_name);
+ 			cpu->unusable = 1;
+ 			continue;
+ 		}

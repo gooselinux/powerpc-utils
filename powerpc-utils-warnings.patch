@@ -1,0 +1,150 @@
+There are several build warnings generated when building the powerpc-utils
+package, most of these are just innocuous initializations of variables.
+There are a couple of larger changes such as in serv_config.c where the
+results of the fread call needed to be properly checked.
+
+Signed-off-by: Nathan Fontenot <nfont@austin.ibm.com>
+
+---
+ src/drmgr/common_pci.c      |    4 ++--
+ src/drmgr/drslot_chrp_cpu.c |    4 ++--
+ src/drmgr/drslot_chrp_mem.c |    2 +-
+ src/drmgr/rtas_calls.c      |    2 +-
+ src/nvram.c                 |    3 ++-
+ src/ppc64_cpu.c             |    5 +++--
+ src/serv_config.c           |    7 +++----
+ 7 files changed, 14 insertions(+), 13 deletions(-)
+
+Index: powerpc-utils/src/ppc64_cpu.c
+===================================================================
+--- powerpc-utils.orig/src/ppc64_cpu.c	2009-12-01 10:55:06.000000000 -0600
++++ powerpc-utils/src/ppc64_cpu.c	2009-12-01 13:31:21.000000000 -0600
+@@ -117,7 +117,7 @@
+ {
+ 	DIR *d;
+ 	struct dirent *de;
+-	int nthreads;
++	int nthreads = -1;
+ 	int rc;
+ 
+ 	d = opendir("/proc/device-tree/cpus");
+@@ -427,7 +427,8 @@
+ 
+ int main(int argc, char *argv[])
+ {
+-	int rc, opt;
++	int rc = 0;
++	int opt;
+ 	int option_index;
+ 
+ 	if (argc == 1) {
+Index: powerpc-utils/src/drmgr/common_pci.c
+===================================================================
+--- powerpc-utils.orig/src/drmgr/common_pci.c	2009-12-01 10:55:06.000000000 -0600
++++ powerpc-utils/src/drmgr/common_pci.c	2009-12-01 13:52:06.000000000 -0600
+@@ -620,8 +620,8 @@
+ 	struct dr_connector *drc_list;
+ 	struct dr_connector *drc;
+ 	struct dr_node *node;
+-	int child_dev_type;
+-	int rc;
++	int child_dev_type = 0;
++	int rc = -1;
+ 
+ 	drc_list = get_drc_info(path);
+ 	if (drc_list == NULL)
+Index: powerpc-utils/src/drmgr/drslot_chrp_cpu.c
+===================================================================
+--- powerpc-utils.orig/src/drmgr/drslot_chrp_cpu.c	2009-12-01 13:35:11.000000000 -0600
++++ powerpc-utils/src/drmgr/drslot_chrp_cpu.c	2009-12-01 13:35:42.000000000 -0600
+@@ -66,7 +66,7 @@
+ struct dr_node *
+ get_available_cpu(struct options *opts, struct dr_info *dr_info)
+ {
+-	struct dr_node *cpu;
++	struct dr_node *cpu = NULL;
+ 	struct dr_node *survivor = NULL;
+ 	struct thread *t;
+ 
+@@ -297,7 +297,7 @@
+ drslot_chrp_cpu(struct options *opts)
+ {
+ 	struct dr_info dr_info;
+-	int rc;
++	int rc = -1;
+ 
+ 	if (! cpu_dlpar_capable()) {
+ 		err_msg("CPU DLPAR capability is not enabled on this "
+Index: powerpc-utils/src/drmgr/drslot_chrp_mem.c
+===================================================================
+--- powerpc-utils.orig/src/drmgr/drslot_chrp_mem.c	2009-12-01 10:55:06.000000000 -0600
++++ powerpc-utils/src/drmgr/drslot_chrp_mem.c	2009-12-01 13:36:42.000000000 -0600
+@@ -1062,7 +1062,7 @@
+ int
+ drslot_chrp_mem(struct options *opts)
+ {
+-	int rc;
++	int rc = -1;
+ 
+ 	if (opts->p_option) {
+ 		/* This is a entitlement or weight change */
+Index: powerpc-utils/src/drmgr/rtas_calls.c
+===================================================================
+--- powerpc-utils.orig/src/drmgr/rtas_calls.c	2009-12-01 10:55:06.000000000 -0600
++++ powerpc-utils/src/drmgr/rtas_calls.c	2009-12-01 13:39:31.000000000 -0600
+@@ -267,7 +267,7 @@
+ 	struct of_node *first_node = NULL;
+ 	struct of_node *last_node = NULL;	/* Last node processed */
+ 	struct of_property *property;
+-	struct of_property *last_property;	/* Last property processed */
++	struct of_property *last_property = NULL; /* Last property processed */
+ 	int *work_int;
+ 	int rc;
+ 
+Index: powerpc-utils/src/serv_config.c
+===================================================================
+--- powerpc-utils.orig/src/serv_config.c	2009-12-01 10:55:06.000000000 -0600
++++ powerpc-utils/src/serv_config.c	2009-12-01 13:49:42.000000000 -0600
+@@ -1673,10 +1673,8 @@
+ 		return 2;
+ 	}
+ 	rc = fread(buffer, 1, BUF_SIZE, fp);
+-	buffer[rc-1] = '\0';
+-	pclose(fp);
+-
+-	if (buffer) {
++	if (!ferror(fp)) {
++		buffer[rc] = '\0';
+ 		if (strstr(buffer, "ibm,setupcfg"))
+ 			nvram_setupcfg = 1;
+ 		if (strstr(buffer, "common"))
+@@ -1684,6 +1682,7 @@
+ 		if (strstr(buffer, "of-config"))
+ 			nvram_ofconfig = 1;
+ 	}
++	pclose(fp);
+ 
+ 	if (verbose > 1) {
+ 		printf("ibm,setupcfg NVRAM partition %s.\n",
+Index: powerpc-utils/src/nvram.c
+===================================================================
+--- powerpc-utils.orig/src/nvram.c	2009-12-01 13:50:57.000000000 -0600
++++ powerpc-utils/src/nvram.c	2009-12-01 14:03:28.000000000 -0600
+@@ -42,6 +42,7 @@
+ #include <netinet/in.h> /* for ntohs */
+ #include <glob.h>
+ #include <getopt.h>
++#include <inttypes.h>
+ 
+ #include "nvram.h"
+ 
+@@ -1020,7 +1021,7 @@
+ 	/* ToDo: what is the length of the data?  We dump until the 
+ 	   next cpu data. */
+ 	len = cpu_regs[cpu+1] - cpu_regs[cpu];
+-	printf("CPU %d Register Data (len=%x, offset=%x)\n", cpu, len, 
++	printf("CPU %d Register Data (len=%x, offset=%"PRIx64")\n", cpu, len,
+ 		cpu_regs[cpu]-p);
+ 	if (len < 4096)	/* reasonable bound */
+ 	    dump_raw_data((char *)cpu_regs[cpu], len);
+
